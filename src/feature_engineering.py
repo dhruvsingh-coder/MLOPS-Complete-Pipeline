@@ -1,13 +1,9 @@
 import pandas as pd
 import os
-from sklearn.feature_extraction.text import TfidfVectorizer
 import logging
+import yaml
 import joblib
-
-# ---------------- CONFIG (INBUILT) ----------------
-MAX_FEATURES = 500   # ✅ you control from here
-TRAIN_PATH = './data/interim/train_processed.csv'
-TEST_PATH = './data/interim/test_processed.csv'
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # ---------------- LOGGING ----------------
 log_dir = 'logs'
@@ -17,88 +13,69 @@ logger = logging.getLogger('feature_engineering')
 logger.setLevel(logging.DEBUG)
 
 if not logger.handlers:
-    console_handler = logging.StreamHandler()
-    file_handler = logging.FileHandler(os.path.join(log_dir, 'feature_engineering.log'))
+    ch = logging.StreamHandler()
+    fh = logging.FileHandler(os.path.join(log_dir, 'feature_engineering.log'))
 
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    file_handler.setFormatter(formatter)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    fh.setFormatter(formatter)
 
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
+    logger.addHandler(ch)
+    logger.addHandler(fh)
 
-# ---------------- FUNCTIONS ----------------
-
-def load_data(file_path: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(file_path)
-        df.fillna('', inplace=True)
-        logger.debug(f'Data loaded from {file_path}')
-        return df
-    except Exception as e:
-        logger.error(f'Error loading data: {e}')
-        raise
-
-
-def apply_tfidf(train_data: pd.DataFrame, test_data: pd.DataFrame):
-    try:
-        vectorizer = TfidfVectorizer(max_features=MAX_FEATURES)
-
-        X_train = train_data['text']
-        y_train = train_data['target']
-        X_test = test_data['text']
-        y_test = test_data['target']
-
-        X_train_vec = vectorizer.fit_transform(X_train)
-        X_test_vec = vectorizer.transform(X_test)
-
-        train_df = pd.DataFrame(X_train_vec.toarray())
-        train_df['target'] = y_train.values
-
-        test_df = pd.DataFrame(X_test_vec.toarray())
-        test_df['target'] = y_test.values
-
-        # ✅ Save vectorizer (VERY IMPORTANT)
-        os.makedirs("models", exist_ok=True)
-        joblib.dump(vectorizer, "models/tfidf_vectorizer.pkl")
-
-        logger.debug('TF-IDF applied successfully')
-
-        return train_df, test_df
-
-    except Exception as e:
-        logger.error(f'TF-IDF error: {e}')
-        raise
-
-
-def save_data(df: pd.DataFrame, file_path: str):
-    try:
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        df.to_csv(file_path, index=False)
-        logger.debug(f'Data saved at {file_path}')
-    except Exception as e:
-        logger.error(f'Error saving data: {e}')
-        raise
-
+# ---------------- PARAMS ----------------
+def load_params(path):
+    with open(path, 'r') as f:
+        return yaml.safe_load(f)
 
 # ---------------- MAIN ----------------
-
 def main():
     try:
-        train_data = load_data(TRAIN_PATH)
-        test_data = load_data(TEST_PATH)
+        params = load_params('params.yaml')
+        max_features = params['feature_engineering']['max_features']
 
-        train_df, test_df = apply_tfidf(train_data, test_data)
+        # Load data
+        train = pd.read_csv('./data/interim/train_processed.csv')
+        test = pd.read_csv('./data/interim/test_processed.csv')
 
-        save_data(train_df, './data/processed/train_tfidf.csv')
-        save_data(test_df, './data/processed/test_tfidf.csv')
+        # 🔥 FIX 1: Handle NaN values
+        train['text'] = train['text'].fillna('')
+        test['text'] = test['text'].fillna('')
 
-        logger.info("✅ Feature engineering completed")
+        # 🔥 FIX 2: Remove empty rows (important)
+        train = train[train['text'].str.strip() != '']
+        test = test[test['text'].str.strip() != '']
+
+        logger.debug(f"Train shape after cleaning: {train.shape}")
+        logger.debug(f"Test shape after cleaning: {test.shape}")
+
+        # TF-IDF
+        tfidf = TfidfVectorizer(max_features=max_features)
+
+        X_train = tfidf.fit_transform(train['text'])
+        X_test = tfidf.transform(test['text'])
+
+        # Convert to DataFrame
+        train_df = pd.DataFrame(X_train.toarray())
+        train_df['target'] = train['target'].values
+
+        test_df = pd.DataFrame(X_test.toarray())
+        test_df['target'] = test['target'].values
+
+        # Save vectorizer
+        os.makedirs('models', exist_ok=True)
+        joblib.dump(tfidf, 'models/tfidf.pkl')
+
+        # Save processed data
+        os.makedirs('./data/processed', exist_ok=True)
+        train_df.to_csv('./data/processed/train_tfidf.csv', index=False)
+        test_df.to_csv('./data/processed/test_tfidf.csv', index=False)
+
+        logger.info("✅ Feature Engineering Completed Successfully")
 
     except Exception as e:
-        logger.error(f'Pipeline failed: {e}')
+        logger.error(f"Feature engineering failed: {e}")
         print(f"Error: {e}")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

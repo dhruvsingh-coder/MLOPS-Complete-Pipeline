@@ -3,6 +3,8 @@ stages:
     cmd: python src/data_ingestion.py
     deps:
     - src/data_ingestion.py
+    params:
+    - data_ingestion.test_size
     outs:
     - data/raw
 
@@ -19,14 +21,20 @@ stages:
     deps:
     - data/interim
     - src/feature_engineering.py
+    params:
+    - feature_engineering.max_features
     outs:
     - data/processed
+    - models/tfidf.pkl     # ✅ important (vectorizer tracked)
 
   model_building:
     cmd: python src/model_building.py
     deps:
     - data/processed
     - src/model_building.py
+    params:
+    - model_building.n_estimators
+    - model_building.random_state
     outs:
     - models/model.pkl
 
@@ -39,7 +47,12 @@ stages:
     metrics:
     - reports/metrics.json
 
+# ---------------- GLOBAL ----------------
+
+params:
+- params.yaml
 metrics:
+- reports/metrics.json
 - dvclive/metrics.json
 plots:
 - dvclive/plots/metrics:
